@@ -23,22 +23,27 @@ punctuation = ['!','"','#','$','%','&',"'",'(',')','*','+',',','-','.','/',':','
 brown_corpus= [x.lower() for x in brown.words()]
 pun_stop = punctuation + stopwords.words('english')
 
-brown_corpus= filter_words1 = [x for x in brown_corpus if x not in pun_stop]
-brown_corpus= list(filter(lambda x: x.isalpha() and len(x) > 1, filter_words1)) # remove numbers and single letter words
+# brown_corpus= filter_words1 = [x for x in brown_corpus if x not in pun_stop]
+brown_sents = [
+    ' '.join([w.lower() for w in sent if w.isalpha() and w.lower() not in pun_stop])
+    for sent in brown.sents()
+]
+# brown_corpus= list(filter(lambda x: x.isalpha() and len(x) > 1, filter_words1)) # remove numbers and single letter words
 
 #Step-2: Implement co-occurance matrix
 words_freq = defaultdict(int)
-for line in tqdm(brown_corpus):
+for line in tqdm(brown_sents):
     line = line.split()
     for word in line:
         words_freq[word]+=1
 
-brown_corpus_filtered = []
-for sentence in tqdm(brown_corpus):
-    brown_corpus_filtered.append(' '.join([word for word in sentence.split() if words_freq[word]>10]))
+brown_corpus_filtered = [
+    ' '.join([w for w in sent.split() if words_freq[w] > 10])
+    for sent in brown_sents
+]
 
 vectorizer = CountVectorizer()
-vectorized_mat = vectorizer.fit_transform(brown_corpus_filtered)
+vectorized_mat = vectorizer.fit_transform([s for s in brown_corpus_filtered if s.strip()])
 token_list = vectorizer.get_feature_names_out()
 
 print("Count Matrix Shape: ", vectorized_mat.shape)
@@ -52,8 +57,6 @@ print("Shape of Co-Occurence Matrix", co_occ_mat.shape)
 
 #Step-3: Apply SVD on Cooccurance matrix
 svd = TruncatedSVD(n_components=350) #Setting top 350 features
-svd_mat = svd.fit_transform(co_occ_mat)
-svd = TruncatedSVD(n_components=350)
 svd_mat = svd.fit_transform(co_occ_mat)
 
 print("Explained Variance Ratio: ", svd.explained_variance_ratio_)
