@@ -199,13 +199,21 @@ class CBOWModel(nn.Module):
 
         return torch.mean(score + neg_score)
     
-    def save_embedding(self, id2word, file_name):
-        embedding = self.u_embeddings.weight.cpu().data.numpy()
-        with open(file_name, 'w') as f:
-            f.write('%d %d\n' % (len(id2word), self.emb_dimension))
-            for w_id, w in id2word.items():
-                e = ' '.join(map(str, embedding[w_id]))
-                f.write('%s %s\n' % (w, e))
+
+    def save_embedding_pt(self, id2word, pt_path):
+        """Save embeddings as .pt dict matching SVD format:
+           {'embeddings': Tensor(vocab_size, emb_dim), 'vocab': [word, ...]}
+           Row i corresponds to id2word[i].
+        """
+        embedding = self.u_embeddings.weight.cpu().data  # Tensor (vocab_size, emb_dim)
+
+        # Build vocab list aligned to row indices (id2word keys are ints)
+        max_id  = max(id2word.keys())
+        vocab   = [id2word.get(i, '<UNK>') for i in range(max_id + 1)]
+
+        os.makedirs(os.path.dirname(pt_path), exist_ok=True)
+        torch.save({'embeddings': embedding, 'vocab': vocab}, pt_path)
+        print(f"Saved CBOW embeddings to {pt_path} | Shape: {embedding.shape}")
     
 
 #Ste-4: Training Loop and saving the embedding model
@@ -272,7 +280,7 @@ class CBOWTrainer:
                     print(f"  Step {i}, Loss: {running_loss:.4f}")
 
             # Save after every epoch
-            self.model.save_embedding(self.data.id2word, self.output_file)
+            self.model.save_embedding_pt(self.data.id2word, "embeddings/cbow.pt")
             print(f"Embeddings saved to {self.output_file}")
                 
 

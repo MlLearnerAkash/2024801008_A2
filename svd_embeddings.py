@@ -5,6 +5,7 @@
 import os
 import sys
 import numpy as np
+import torch
 from collections import defaultdict
 from tqdm import tqdm
 import nltk
@@ -64,4 +65,17 @@ print("Eigen Values: ", svd.singular_values_)
 
 print("The shape SVD matrix obtained using top k eigen-vectors: ", svd_mat.shape)
 
+
 #Saving the svd_matrix
+os.makedirs('embeddings', exist_ok=True)
+
+# Save as a dict: word -> embedding tensor
+svd_tensor = torch.tensor(svd_mat, dtype=torch.float32)   # (vocab_size, 350)
+token_list_py = list(token_list)                           # list of vocab words
+
+torch.save({
+    'embeddings': svd_tensor,   # shape (V, 350)
+    'vocab': token_list_py      # list of V words (index i → token_list_py[i])
+}, 'embeddings/svd.pt')
+
+print(f"Saved SVD embeddings to embeddings/svd_embeddings.pt | Shape: {svd_tensor.shape}")
