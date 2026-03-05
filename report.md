@@ -1,3 +1,6 @@
+## SVD Hyperparams
+Using the dimension of 350 for those words with frequency more than 10.
+
 ## Analogy Test
 We evaluate three embedding variants using the analogy formula `vec(B) − vec(A) + vec(C)`, selecting the top-5 nearest neighbours (excluding query words) by cosine similarity.
 ### SVD
@@ -87,7 +90,8 @@ Cosine similarity between occupation words and gendered words (`man` / `woman`) 
 | nurse | 0.4562 | 0.6139 | **woman** |
 | homemaker | 0.2356 | 0.4258 | **woman** |
 
-
+## Frozen Embeddings
+For all three cases, the embedding layer is frozen to laverage the Classifier for prediction. It gives a fair implicit comparison for different embeddings with same classifier.
 
 ## Embedding Comparison
 
@@ -95,6 +99,21 @@ Model, Accuracy, Macro-F1
 SVD, 0.90, 0.83
 CBOW, 0.73, 0.59
 GLOV, 0.96, 0.91
+
+Among al the embedding models, GLOV model perfroming best because it is being trained on larger dataset implying larger context and co-occurances.
+
+### Confusion matrix for best(GLOV) model
+![confusion_matrix.png](confusion matrix)
+
+
+## Hyperparameters analysis
+model, Window Size, Hidden Layer, Learning Rare, Accuracy
+svd, 4, 256, 1e-3, 0.87
+svd, 4, 512, 1e-3, 0.87
+cbow, 4, 256, 1e-3, 0.71
+cbow, 4, 512, 1e-3, 0.71
+glove, 4, 256, 1e-3, 0.96
+glove, 4, 512, 1e-3, 0.97
 
 ## False Predictions
 

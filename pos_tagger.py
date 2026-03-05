@@ -349,7 +349,7 @@ def evaluate_test(model, loader, tag_vocab, device='cpu', use_wandb=False,
     return acc, macro_f1, cm
 
 if __name__ == "__main__":
-    CONTEXT_SIZE = 2   # ← change this to 1, 2, 3, etc.
+    CONTEXT_SIZE = 4   # ← change this to 1, 2, 3, etc.
     BATCH_SIZE   = 64
 
     # Split first so vocab is built only from training data
@@ -401,7 +401,7 @@ if __name__ == "__main__":
     print(f"Input dim: {input_dim}")   # e.g., C=2, d=100 → 500
 
     # Instantiate model
-    HIDDEN_DIM = 256
+    HIDDEN_DIM = 512
     NUM_TAGS   = len(tag_vocab)
     FREEZE_EMB = True   # Set False to fine-tune embeddings during training
 
