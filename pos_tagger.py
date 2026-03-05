@@ -1,5 +1,6 @@
 #@Author: Akash Manna
 #@Date: 04/03/2026
+import wandb
 import nltk
 from nltk.corpus import brown
 import random
@@ -179,7 +180,7 @@ class POSTagger(nn.Module):
 # Trainer
 # ─────────────────────────────────────────────
 
-def train(model, train_loader, val_loader, criterion, optimizer, epochs=10, device='cpu'):
+def train(model, train_loader, val_loader, criterion, optimizer, epochs=10, device='cpu', use_wandb=False):
     model.to(device)
     best_val_loss = float('inf')
     best_state    = None
@@ -211,6 +212,15 @@ def train(model, train_loader, val_loader, criterion, optimizer, epochs=10, devi
               f"Train Loss: {train_loss:.4f}  Acc: {train_acc:.4f} | "
               f"Val Loss: {val_loss:.4f}  Acc: {val_acc:.4f}")
 
+        if use_wandb:
+            wandb.log({
+                "epoch":      epoch,
+                "train/loss": train_loss,
+                "train/acc":  train_acc,
+                "val/loss":   val_loss,
+                "val/acc":    val_acc,
+            })
+
         # Save best model weights
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -219,6 +229,8 @@ def train(model, train_loader, val_loader, criterion, optimizer, epochs=10, devi
     # Restore best weights before returning
     model.load_state_dict(best_state)
     print(f"\nRestored best model (val loss: {best_val_loss:.4f})")
+    if use_wandb:
+        wandb.run.summary["best_val_loss"] = best_val_loss
     return model
 
 
@@ -241,12 +253,23 @@ def evaluate(model, loader, criterion, device='cpu'):
     return total_loss / total, correct / total
 
 
-def evaluate_test(model, loader, tag_vocab, device='cpu'):
-    """Full test evaluation: Accuracy + Macro-F1."""
-    from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+def evaluate_test(model, loader, tag_vocab, device='cpu', use_wandb=False,
+                  word_vocab=None, n_errors=5):
+    """Full test evaluation: Accuracy + Macro-F1 + Confusion Matrix.
+
+    word_vocab : optional word→id dict; when provided, error examples show
+                 the decoded context window instead of raw integer ids.
+    n_errors   : number of misclassified examples to print (and log to wandb).
+    """
+    from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
+
+    # id→word lookup for error decoding
+    id2word = {v: k for k, v in word_vocab.items()} if word_vocab else {}
 
     model.eval()
     all_preds, all_labels = [], []
+    error_examples = []          # (window_str, true_tag_str, pred_tag_str)
+
     with torch.no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.to(device)
@@ -255,11 +278,19 @@ def evaluate_test(model, loader, tag_vocab, device='cpu'):
             all_preds.extend(preds.tolist())
             all_labels.extend(y_batch.tolist())
 
+            # Collect error examples while we still have x_batch handy
+            if len(error_examples) < n_errors:
+                x_cpu = x_batch.cpu()
+                for window_ids, true_id, pred_id in zip(
+                        x_cpu.tolist(), y_batch.tolist(), preds.tolist()):
+                    if true_id != pred_id and len(error_examples) < n_errors:
+                        error_examples.append((window_ids, true_id, pred_id))
+
     acc      = accuracy_score(all_labels, all_preds)
     macro_f1 = f1_score(all_labels, all_preds, average='macro')
     cm       = confusion_matrix(all_labels, all_preds)
 
-    idx2tag = {v: k for k, v in tag_vocab.items()}
+    idx2tag   = {v: k for k, v in tag_vocab.items()}
     tag_names = [idx2tag[i] for i in range(len(tag_vocab))]
 
     print(f"\n{'─'*40}")
@@ -269,6 +300,51 @@ def evaluate_test(model, loader, tag_vocab, device='cpu'):
     print(f"\nConfusion Matrix (rows=true, cols=pred):")
     print(f"Tags: {tag_names}")
     print(cm)
+    print(classification_report(all_labels, all_preds, target_names=tag_names))
+
+    # ── Error analysis ────────────────────────────────────────────────────────
+    print(f"\n{'─'*40}")
+    print(f"  Sample Misclassifications (first {n_errors})")
+    print(f"{'─'*40}")
+    error_rows = []
+    for window_ids, true_id, pred_id in error_examples:
+        words_str = ' '.join(id2word.get(i, f'<{i}>') for i in window_ids)
+        true_str  = idx2tag[true_id]
+        pred_str  = idx2tag[pred_id]
+        print(f"  Context : [{words_str}]")
+        print(f"  True tag: {true_str}  →  Predicted: {pred_str}\n")
+        error_rows.append([words_str, true_str, pred_str])
+
+    if use_wandb and error_rows:
+        err_table = wandb.Table(
+            columns=["context_window", "true_tag", "predicted_tag"],
+            data=error_rows
+        )
+        wandb.log({"test/error_examples": err_table})
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if use_wandb:
+        # ── scalar summary ──
+        wandb.run.summary["test/accuracy"] = acc
+        wandb.run.summary["test/macro_f1"] = macro_f1
+
+        # ── per-tag metrics table ──
+        per_tag_f1 = f1_score(all_labels, all_preds, average=None)
+        metrics_table = wandb.Table(
+            columns=["tag", "f1"],
+            data=[[tag_names[i], float(per_tag_f1[i])] for i in range(len(tag_names))]
+        )
+        wandb.log({"test/per_tag_f1": metrics_table})
+
+        # ── confusion matrix ──
+        # Pass integer indices + class_names; do NOT convert to strings first.
+        wandb.log({
+            "test/confusion_matrix": wandb.plot.confusion_matrix(
+                y_true=all_labels,
+                preds=all_preds,
+                class_names=tag_names,
+            )
+        })
 
     return acc, macro_f1, cm
 
@@ -297,8 +373,8 @@ if __name__ == "__main__":
     EMBEDDING_VARIANT = 'glove'   # options: 'svd' | 'cbow' | 'glove' | 'fasttext'
 
     EMBEDDING_CONFIGS = {
-        'svd':      ('embeddings/svd_embeddings.pt',       350, None,        None),
-        'cbow':     ('embeddings/cbow_embeddings.pt',      100, None,        None),
+        'svd':      ('embeddings/svd.pt',       350, None,        None),
+        'cbow':     ('embeddings/cbow.pt',      100, None,        None),
         'glove':    ('embeddings/glove_embeddings.pt',     100, 'glove',     100),
         'fasttext': ('embeddings/fasttext_embeddings.pt',  300, 'fasttext',  300),
     }
@@ -345,7 +421,34 @@ if __name__ == "__main__":
     EPOCHS = 10
     print(f"Training on {DEVICE}")
 
-    model = train(model, train_loader, val_loader, criterion, optimizer, epochs=EPOCHS, device=DEVICE)
+    # ── W&B run ──────────────────────────────────────────────────────────────
+    USE_WANDB = True
+    wandb.init(
+        project="pos-tagger-inlp",
+        name=f"{EMBEDDING_VARIANT}_C{CONTEXT_SIZE}_H{HIDDEN_DIM}",
+        config={
+            "embedding_variant": EMBEDDING_VARIANT,
+            "embed_dim":         EMB_DIM,
+            "context_size":      CONTEXT_SIZE,
+            "hidden_dim":        HIDDEN_DIM,
+            "freeze_emb":        FREEZE_EMB,
+            "epochs":            EPOCHS,
+            "batch_size":        BATCH_SIZE,
+            "optimizer":         "Adam",
+            "lr":                1e-3,
+            "num_tags":          NUM_TAGS,
+            "train_size":        len(train_dataset),
+            "val_size":          len(val_dataset),
+            "test_size":         len(test_dataset),
+        }
+    )
+    # ─────────────────────────────────────────────────────────────────────────
+
+    model = train(model, train_loader, val_loader, criterion, optimizer,
+                  epochs=EPOCHS, device=DEVICE, use_wandb=USE_WANDB)
 
     # Final evaluation on test set
-    evaluate_test(model, test_loader, tag_vocab, device=DEVICE)
+    evaluate_test(model, test_loader, tag_vocab, device=DEVICE,
+                  use_wandb=USE_WANDB, word_vocab=word_vocab, n_errors=5)
+
+    wandb.finish()
